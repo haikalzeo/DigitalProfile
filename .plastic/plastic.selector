@@ -1,0 +1,4 @@
+repository "DigitalProfile@haikal_zeo@cloud"
+  path "/"
+    br "/main"
+    co "/main"
