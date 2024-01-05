@@ -47,6 +47,9 @@ public class RaycastIndicator : MonoBehaviour
     private bool isCameraPhase = false;
     private bool isNativeGalleryGranted = false;
 
+    public RuntimeAnimatorController masculineController;
+    public RuntimeAnimatorController feminineController;
+
     void Awake()
     {
         raycastManager = GetComponent<ARRaycastManager>();
@@ -192,7 +195,7 @@ public class RaycastIndicator : MonoBehaviour
         avatarLoader.OnCompleted += (_, args) =>
         {
             GameObject avatar = args.Avatar;
-            AvatarAnimatorHelper.SetupAnimator(args.Metadata.BodyType, avatar);
+            SetAnimatorController(args.Metadata.OutfitGender, avatar);
             SetAvatarTransform(avatar);
             anchor = avatar.GetComponent<ARAnchor>();
             if (anchor == null)
@@ -216,12 +219,24 @@ public class RaycastIndicator : MonoBehaviour
         };
         avatarLoader.LoadAvatar(avatarUrl);
     }
-
     void SetAvatarTransform(GameObject avatar)
     {
         avatar.transform.localScale = new Vector3(0.15f, 0.15f, 0.15f);
         avatar.transform.SetPositionAndRotation(placementPose.position, placementPose.rotation);
         avatar.transform.Rotate(0, 180, 0);
+    }
+
+    private void SetAnimatorController(OutfitGender outfitGender, GameObject avatar)
+    {
+        var animator = avatar.GetComponent<Animator>();
+        if (animator != null && outfitGender == OutfitGender.Masculine)
+        {
+            animator.runtimeAnimatorController = masculineController;
+        }
+        else
+        {
+            animator.runtimeAnimatorController = feminineController;
+        }
     }
     public bool IsGlbUrlValid(string url)
     {
