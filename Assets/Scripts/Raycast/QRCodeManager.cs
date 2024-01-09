@@ -41,24 +41,4 @@ public class QRCodeManager
             onDecoded?.Invoke(result.Text);
         }
     }
-    public Texture2D GenerateQR(string text)
-    {
-        var encoded = new Texture2D(256, 256);
-        var writer = new BarcodeWriter
-        {
-            Format = BarcodeFormat.QR_CODE,
-            Options = new QrCodeEncodingOptions
-            {
-                ErrorCorrection = ErrorCorrectionLevel.M,
-                CharacterSet = "UTF-8",
-                DisableECI = true,
-                Height = encoded.height,
-                Width = encoded.width
-            }
-        };
-        var color32 = writer.Write(text);
-        encoded.SetPixels32(color32);
-        encoded.Apply();
-        return encoded;
-    }
 }

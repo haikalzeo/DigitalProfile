@@ -13,6 +13,8 @@ using static NativeGallery;
 public class RaycastIndicator : MonoBehaviour
 {
     private QRCodeManager qrManager;
+    private ApiManager apiManager;
+
     public ARCameraManager ARCamera;
 
     ARAnchor anchor;
@@ -50,11 +52,17 @@ public class RaycastIndicator : MonoBehaviour
     public RuntimeAnimatorController masculineController;
     public RuntimeAnimatorController feminineController;
 
+    public GameObject rnComponent;
+    public string token;
+
     void Awake()
     {
         raycastManager = GetComponent<ARRaycastManager>();
         planeManager = GetComponent<ARPlaneManager>();
         qrManager = new QRCodeManager();
+        apiManager = new ApiManager();
+        myAvatarUrl = rnComponent.GetComponent<DataFromReact>().avatarUrl;
+        token = rnComponent.GetComponent<DataFromReact>().token;
     }
     void OnEnable()
     {
@@ -76,23 +84,27 @@ public class RaycastIndicator : MonoBehaviour
             {
                 StartCoroutine(qrManager.DecodeQR(image, decodedText =>
                 {
-                    text.SetText("");
-                    if (IsGlbUrlValid(decodedText))
+                    StartCoroutine(apiManager.PostRequest(decodedText, token, result =>
                     {
-                        if (instantiatedAvatar.ContainsKey(decodedText))
+                        text.SetText("");
+                        if (instantiatedAvatar.ContainsKey(result))
                         {
                             text.SetText("Avatar has already been placed from this QR Code");
                             return;
                         }
-                        otherAvatarUrl = decodedText;
-                        
+                        otherAvatarUrl = result;
+
                         isScanQrPhase = false;
-                        
+
                         ScanQrIcon.gameObject.SetActive(false);
 
                         CancelScanQrBtn.gameObject.SetActive(false);
                         ActivateButton(ScanMoreQrBtn, true);
-                    }
+
+                    }, () =>
+                    {
+                        text.SetText("API call failed. Unable to retrieve data.");
+                    }));
                 }));
                 image.Dispose();
             }

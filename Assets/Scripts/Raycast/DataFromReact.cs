@@ -5,9 +5,11 @@ using UnityEngine;
 
 public class DataFromReact : MonoBehaviour
 {
-    public TMP_Text value;
-    public TMP_Text label;
+    public TMP_Text text_token;
+    public TMP_Text text_avatarUrl;
     public static DataFromReact instance;
+    public string token;
+    public string avatarUrl;
 
     private void Awake()
     {
@@ -19,16 +21,16 @@ public class DataFromReact : MonoBehaviour
 
     public class JsonObject
     {
-        public string value;
-        public string label;
+        public string token;
+        public string avatarUrl;
     }
 
-    // As you can see here is the name of the function that we get the data.
-    // it should have the same name in RN function postMessage.
     public void GetDatas(string json)
     {
         JsonObject obj = JsonUtility.FromJson<JsonObject>(json);
-        value.SetText(obj.value);
-        label.SetText(obj.label);
+        token = obj.token;
+        avatarUrl = obj.avatarUrl; 
+        text_token.SetText(token);
+        text_avatarUrl.SetText(avatarUrl);
     }
 }
