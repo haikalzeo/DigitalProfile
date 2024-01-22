@@ -1,15 +1,11 @@
-using System.Collections;
-using System.Collections.Generic;
-using TMPro;
 using UnityEngine;
 
 public class DataFromReact : MonoBehaviour
 {
-    public TMP_Text text_token;
-    public TMP_Text text_avatarUrl;
     public static DataFromReact instance;
-    public string token;
-    public string avatarUrl;
+    public string token = null;
+    public string avatarUrl = null;
+    public string baseUrl = null;
 
     private void Awake()
     {
@@ -18,19 +14,18 @@ public class DataFromReact : MonoBehaviour
             instance = this;
         }
     }
-
     public class JsonObject
     {
         public string token;
         public string avatarUrl;
+        public string baseUrl;
     }
 
     public void GetDatas(string json)
     {
         JsonObject obj = JsonUtility.FromJson<JsonObject>(json);
         token = obj.token;
-        avatarUrl = obj.avatarUrl; 
-        text_token.SetText(token);
-        text_avatarUrl.SetText(avatarUrl);
+        avatarUrl = obj.avatarUrl;
+        baseUrl = obj.baseUrl;
     }
 }

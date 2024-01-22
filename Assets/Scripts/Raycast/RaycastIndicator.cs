@@ -24,9 +24,6 @@ public class RaycastIndicator : MonoBehaviour
     static List<ARRaycastHit> hits = new List<ARRaycastHit>();
     private Dictionary<string, GameObject> instantiatedAvatar = new Dictionary<string, GameObject>();
 
-    private string otherAvatarUrl = null;
-    public string myAvatarUrl = null;
-
     private UnityEngine.Pose placementPose;
     public GameObject Indicator;
     public TMP_Text text;
@@ -34,6 +31,13 @@ public class RaycastIndicator : MonoBehaviour
     public VideoPlayer ScanPlane;
     public RawImage ScanPlanUI;
     public RawImage BlankScreen;
+    public GameObject rnComponent;
+    public Image textBg;
+
+    private string otherAvatarUrl = null;
+    public string myAvatarUrl = null;
+    public string token = null;
+    public string baseUrl = null;
 
     public Button PlaceAvatarBtn;
     public Button ScanMoreQrBtn;
@@ -43,17 +47,14 @@ public class RaycastIndicator : MonoBehaviour
     public Button CaptureBtn;
 
     private bool isPlacementPoseValid = false;
-    private bool isScanQrPhase = false;
+    private bool isScanQrPhase = true;
     private bool isIdlePhase = false;
-    private bool isMyAvatarPhase = true;
+    private bool isMyAvatarPhase = false;
     private bool isCameraPhase = false;
     private bool isNativeGalleryGranted = false;
 
     public RuntimeAnimatorController masculineController;
     public RuntimeAnimatorController feminineController;
-
-    public GameObject rnComponent;
-    public string token;
 
     void Awake()
     {
@@ -61,8 +62,26 @@ public class RaycastIndicator : MonoBehaviour
         planeManager = GetComponent<ARPlaneManager>();
         qrManager = new QRCodeManager();
         apiManager = new ApiManager();
-        myAvatarUrl = rnComponent.GetComponent<DataFromReact>().avatarUrl;
+    }
+    private IEnumerator Start()
+    {
+        // Wait until the DataFromReact component has at least one
+        while (string.IsNullOrEmpty(rnComponent.GetComponent<DataFromReact>().avatarUrl) &&
+               string.IsNullOrEmpty(rnComponent.GetComponent<DataFromReact>().token) &&
+               string.IsNullOrEmpty(rnComponent.GetComponent<DataFromReact>().baseUrl))
+        {
+            yield return null; // Wait for one frame
+        }
+
+        myAvatarUrl = apiManager.ChangeUrlExtension(rnComponent.GetComponent<DataFromReact>().avatarUrl);
         token = rnComponent.GetComponent<DataFromReact>().token;
+        baseUrl = rnComponent.GetComponent<DataFromReact>().baseUrl;
+
+        // If the myAvatarUrl is not empty, enable the My Avatar button
+        if (!string.IsNullOrEmpty(myAvatarUrl))
+        {
+            DeactivateButton(MyAvatarBtn, false);
+        }
     }
     void OnEnable()
     {
@@ -70,45 +89,73 @@ public class RaycastIndicator : MonoBehaviour
     }
     void Update()
     {
-        if(!isIdlePhase && !isScanQrPhase && !isCameraPhase)
+        string avatarUrl = isMyAvatarPhase ? myAvatarUrl : otherAvatarUrl;
+        if (!isIdlePhase && !isScanQrPhase && !isCameraPhase && !string.IsNullOrEmpty(avatarUrl))
         {
             UpdatePlacement();
         }
     }
     void OnCameraFrameReceived(ARCameraFrameEventArgs eventArgs)
     {
-        if (!isIdlePhase && !isCameraPhase && isScanQrPhase && (Time.frameCount % 15) == 0)
+        if (isIdlePhase || isCameraPhase || !isScanQrPhase || (Time.frameCount % 8) != 0)
         {
-            XRCpuImage image;
-            if (ARCamera.TryAcquireLatestCpuImage(out image))
-            {
-                StartCoroutine(qrManager.DecodeQR(image, decodedText =>
-                {
-                    StartCoroutine(apiManager.PostRequest(decodedText, token, result =>
-                    {
-                        text.SetText("");
-                        if (instantiatedAvatar.ContainsKey(result))
-                        {
-                            text.SetText("Avatar has already been placed from this QR Code");
-                            return;
-                        }
-                        otherAvatarUrl = result;
-
-                        isScanQrPhase = false;
-
-                        ScanQrIcon.gameObject.SetActive(false);
-
-                        CancelScanQrBtn.gameObject.SetActive(false);
-                        ActivateButton(ScanMoreQrBtn, true);
-
-                    }, () =>
-                    {
-                        text.SetText("API call failed. Unable to retrieve data.");
-                    }));
-                }));
-                image.Dispose();
-            }
+            return;
         }
+
+        XRCpuImage image;
+        // Try to acquire the latest image from the AR camera
+        if (ARCamera.TryAcquireLatestCpuImage(out image))
+        {
+            // Start a coroutine to decode the QR code from the image
+            StartCoroutine(qrManager.DecodeQR(image, decodedText =>
+            {
+                text.SetText("");
+
+                // If the decoded text does not contain the expected prefix, it's an invalid QR code
+                if (!decodedText.Contains("digitalprofile-friend"))
+                {
+                    text.SetText("Invalid QR code");
+                    return;
+                }
+
+                isScanQrPhase = false;
+
+                ScanQrIcon.gameObject.SetActive(false);
+
+                CancelScanQrBtn.gameObject.SetActive(false);
+
+                ActivateButton(ScanMoreQrBtn, true);
+
+                StartCoroutine(TextBG("QR code recognized. Retrieving data...", false));
+
+                // Start a coroutine to send a POST request with the decoded text
+                StartCoroutine(apiManager.PostRequest(decodedText, token, baseUrl, result =>
+                {
+                    textBg.gameObject.SetActive(false);
+
+                    // If the avatar has already been instantiated from this QR code, display a message
+                    if (instantiatedAvatar.ContainsKey(result))
+                    {
+                        text.SetText("Beevatar has already been placed from this QR code");
+                        return;
+                    }
+
+                    StartCoroutine(TextBG("Scan successful", true));
+
+                    // Store the URL of the other avatar
+                    otherAvatarUrl = result;
+
+                }, errorMessage =>
+                {
+                    textBg.gameObject.SetActive(false);
+                    text.SetText(errorMessage);
+                }));
+            }));
+
+            // Dispose of the image to free up resources
+            image.Dispose();
+        }
+
     }
     IEnumerator CaptureImage()
     {
@@ -128,7 +175,16 @@ public class RaycastIndicator : MonoBehaviour
         imageTexture.Apply();
 
         string fileName = "Beevatar " + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".png";
-        Permission permission = SaveImageToGallery(imageTexture, "Beevatar", fileName, (success, path) => text.SetText("Media save result: " + success + " " + path));
+        Permission permission = SaveImageToGallery(imageTexture, "Beevatar", fileName, (success, path) => {
+            if (success)
+            {
+                StartCoroutine(TextBG("Photo saved successfully", true));
+            }
+            else
+            {
+                text.SetText("Failed to save photo");
+            }
+        });
 
         // Reset camera's targetTexture to null to resume rendering to the screen
         Camera.main.targetTexture = null;
@@ -141,59 +197,97 @@ public class RaycastIndicator : MonoBehaviour
 
     void SetScanPlanePhase(bool isActive)
     {
-        ScanPlane.Pause();
-        ScanPlane.gameObject.SetActive(isActive);
-        ScanPlanUI.gameObject.SetActive(isActive);
-
         if (isActive)
         {
-            ScanPlane.Play();
+            ScanPlane.Prepare();
+            ScanPlane.prepareCompleted += HandlePrepareCompleted;
         }
+        else
+        {
+            ScanPlane.Stop();
+        }
+        ScanPlanUI.gameObject.SetActive(isActive);
 
-        ScanMoreQrBtn.gameObject.SetActive(!isActive);
-        MyAvatarBtn.gameObject.SetActive(!isActive);
-        CameraBtn.gameObject.SetActive(!isActive);
+        ScanMoreQrBtn.interactable = !isActive;
+        if (!string.IsNullOrEmpty(myAvatarUrl))
+        {
+            MyAvatarBtn.interactable = !isActive;
+        }
+        if (instantiatedAvatar.Count > 0)
+        {
+            CameraBtn.interactable = !isActive;
+        }
     }
 
-    void UpdatePlacement ()
+    void HandlePrepareCompleted(VideoPlayer player)
     {
+        player.prepareCompleted -= HandlePrepareCompleted;
+        player.Play();
+    }
+
+    void UpdatePlacement()
+    {
+        // If the raycast manager is null, exit the method
         if (raycastManager == null) return;
 
+        // If there are no trackable planes, start the scan plane phase
         if (planeManager.trackables.count == 0)
         {
             SetScanPlanePhase(true);
         }
+        // If there are trackable planes, stop the scan plane phase
         else
         {
             SetScanPlanePhase(false);
         }
 
+        // Get the center of the screen
         var screenCenter = Camera.main.ViewportToScreenPoint(new Vector3(0.5f, 0.5f));
+
+        // Determine the URL of the avatar to place
+        string avatarUrl = isMyAvatarPhase ? myAvatarUrl : otherAvatarUrl;
+
+        // Perform a raycast from the center of the screen
         if (raycastManager.Raycast(screenCenter, hits, TrackableType.PlaneWithinPolygon))
         {
             text.SetText("");
-            isPlacementPoseValid = hits.Count > 0;    
-            if(isPlacementPoseValid)
+
+            // Check if the raycast hit a trackable plane
+            isPlacementPoseValid = hits.Count > 0;
+
+            // If the raycast hit a trackable plane, update the placement pose
+            if (isPlacementPoseValid)
             {
+                // Get the pose of the hit
                 placementPose = hits[0].pose;
+
+                // Get the forward direction of the camera
                 var cameraForward = Camera.main.transform.forward;
+
+                // Normalize the forward direction to get the bearing
                 var cameraBearing = new Vector3(cameraForward.x, 0, cameraForward.z).normalized;
+
+                // Set the rotation of the placement pose to face the camera
                 placementPose.rotation = Quaternion.LookRotation(cameraBearing);
 
                 Indicator.SetActive(true);
                 Indicator.transform.SetPositionAndRotation(placementPose.position, placementPose.rotation);
 
-                if((!isMyAvatarPhase && otherAvatarUrl != null) || (isMyAvatarPhase && myAvatarUrl != null))
+                // If there's an avatar URL, activate the Place Avatar button
+                if (!string.IsNullOrEmpty(avatarUrl))
                 {
                     ActivateButton(PlaceAvatarBtn, true);
                 }
             }
         }
+        // If the raycast didn't hit a trackable plane but there are trackable planes, hide the indicator and show a message
         else if (planeManager.trackables.count > 0)
         {
             Indicator.SetActive(false);
-            text.SetText("Find a nerby surface to place avatar");
-            if((!isMyAvatarPhase && otherAvatarUrl != null) || (isMyAvatarPhase && myAvatarUrl != null))
+            text.SetText("Find a nearby surface to place beevatar");
+
+            // If there's an avatar URL, disable the Place Avatar button
+            if (!string.IsNullOrEmpty(avatarUrl))
             {
                 DisableButton(PlaceAvatarBtn, true);
             }
@@ -202,35 +296,72 @@ public class RaycastIndicator : MonoBehaviour
 
     void InitiateAvatar()
     {
+        // Determine the URL of the avatar to load
         string avatarUrl = isMyAvatarPhase ? myAvatarUrl : otherAvatarUrl;
+
+        // Create a new avatar loader
         var avatarLoader = new AvatarObjectLoader();
+
+        // Set up the event handler for when the avatar has loaded
         avatarLoader.OnCompleted += (_, args) =>
         {
+            // Get the loaded avatar
             GameObject avatar = args.Avatar;
+
+            // Set the animator controller based on the avatar's outfit gender
             SetAnimatorController(args.Metadata.OutfitGender, avatar);
+
+            // Set the avatar's transform
             SetAvatarTransform(avatar);
+
+            // Get the ARAnchor component from the avatar
             anchor = avatar.GetComponent<ARAnchor>();
+
+            // If the avatar doesn't have an ARAnchor component, add one
             if (anchor == null)
             {
                 anchor = avatar.AddComponent<ARAnchor>();
             }
+
+            // Add the avatar to the dictionary of instantiated avatars
             instantiatedAvatar.Add(avatarUrl, avatar);
+
+            // If this is the user's avatar, reset the myAvatarUrl
             if (isMyAvatarPhase)
             {
                 isMyAvatarPhase = false;
                 myAvatarUrl = null;
             }
+
+            // Reset the otherAvatarUrl
             otherAvatarUrl = null;
+
+            // Hide the indicator
             Indicator.SetActive(false);
+
             DeactivateButton(CameraBtn, false);
+
+            textBg.gameObject.SetActive(false);
         };
+
+        // Set up the event handler for when the avatar fails to load
         avatarLoader.OnFailed += (_, args) =>
         {
-            DeactivateButton(MyAvatarBtn, false);
-            text.SetText("Failed to load avatar");
+            textBg.gameObject.SetActive(false);
+
+            // If this is the user's avatar, deactivate the My Avatar button
+            if (isMyAvatarPhase)
+            {
+                DeactivateButton(MyAvatarBtn, false);
+            }
+
+            text.SetText("Failed to load beevatar");
         };
+
+        // Start loading the avatar
         avatarLoader.LoadAvatar(avatarUrl);
     }
+
     void SetAvatarTransform(GameObject avatar)
     {
         avatar.transform.localScale = new Vector3(0.15f, 0.15f, 0.15f);
@@ -241,43 +372,23 @@ public class RaycastIndicator : MonoBehaviour
     private void SetAnimatorController(OutfitGender outfitGender, GameObject avatar)
     {
         var animator = avatar.GetComponent<Animator>();
-        if (animator != null && outfitGender == OutfitGender.Masculine)
+        if (animator != null)
         {
-            animator.runtimeAnimatorController = masculineController;
+            if(outfitGender == OutfitGender.Masculine)
+            {
+                animator.runtimeAnimatorController = masculineController;
+            } 
+            else
+            {
+                animator.runtimeAnimatorController = feminineController;
+            }
         }
-        else
-        {
-            animator.runtimeAnimatorController = feminineController;
-        }
-    }
-    public bool IsGlbUrlValid(string url)
-    {
-        if (string.IsNullOrEmpty(url))
-        {
-            text.SetText("URL is null or empty");
-            return false;
-        }
-
-        if (!url.StartsWith("https://models.readyplayer.me/") || !url.EndsWith(".glb"))
-        {
-            text.SetText("URL does not match RPM Model URI");
-            return false;
-        }
-
-        Uri uriResult;
-        bool result = Uri.TryCreate(url, UriKind.Absolute, out uriResult) && (uriResult.Scheme == Uri.UriSchemeHttp || uriResult.Scheme == Uri.UriSchemeHttps);
-
-        if (!result)
-        {
-            text.SetText("URL is not a valid URI");
-            return false;
-        }
-        return true;
     }
 
     public void HandlePlacedAvatarBtn()
     {
-        if (isPlacementPoseValid && ((!isMyAvatarPhase && otherAvatarUrl != null) || (isMyAvatarPhase && myAvatarUrl != null)))
+        string avatarUrl = isMyAvatarPhase ? myAvatarUrl : otherAvatarUrl;
+        if (isPlacementPoseValid && !string.IsNullOrEmpty(avatarUrl))
         {
             ResetPhase(true);
 
@@ -289,6 +400,7 @@ public class RaycastIndicator : MonoBehaviour
             {
                 DisableButton(MyAvatarBtn, false);
             }
+            StartCoroutine(TextBG("Initializing beevatar...", false));
 
             InitiateAvatar();
         }
@@ -318,7 +430,7 @@ public class RaycastIndicator : MonoBehaviour
 
     public void HandleMyAvatarBtn()
     {
-        if (myAvatarUrl != null)
+        if (!string.IsNullOrEmpty(myAvatarUrl))
         {
             ResetPhase(false);
             
@@ -346,33 +458,49 @@ public class RaycastIndicator : MonoBehaviour
 
     public void HandleCameraBtn()
     {
-        if (instantiatedAvatar.Count > 0)
+        // Guard clause to exit the method if there are no instantiated avatars
+        if (instantiatedAvatar.Count == 0)
         {
-            if (!isNativeGalleryGranted)
+            return;
+        }
+
+        // If the native gallery permission has been granted, activate the camera phase and exit the method
+        if (isNativeGalleryGranted)
+        {
+            ActivateCameraPhase();
+            return;
+        }
+
+        // If the native gallery permission has not been granted, request it asynchronously
+        RequestPermissionAsynchronously(PermissionType.Read | PermissionType.Write, MediaType.Image, (permissionResult) =>
+        {
+            if (permissionResult)
             {
-                RequestPermissionAsynchronously(PermissionType.Read | PermissionType.Write, MediaType.Image, (permissionResult) =>
-                {
-                    if (permissionResult)
-                    {
-                        ActivateCameraPhase();
-                    }
-                    else
-                    {
-                        text.SetText("Access permission not granted");
-                    }
-                });
+                // If the permission is granted, activate the camera phase
+                ActivateCameraPhase();
             }
             else
             {
-                ActivateCameraPhase();
+                text.SetText("Access permission not granted");
             }
-        }
+        });
     }
 
     public void HandleCaptureBtn()
     {
         StartCoroutine(Blank());
         StartCoroutine(CaptureImage());
+    }
+
+    IEnumerator TextBG(string text, bool isAutoDisapper)
+    {
+        textBg.gameObject.transform.GetChild(0).GetComponent<TMP_Text>().SetText(text);
+        textBg.gameObject.SetActive(true);
+        if(isAutoDisapper)
+        {
+            yield return new WaitForSeconds(2f);
+            textBg.gameObject.SetActive(false);
+        }
     }
 
     IEnumerator Blank()
@@ -442,7 +570,7 @@ public class RaycastIndicator : MonoBehaviour
 
         DeactivateButton(ScanMoreQrBtn, true);
 
-        if (myAvatarUrl != null)
+        if (!string.IsNullOrEmpty(myAvatarUrl))
         {
             DeactivateButton(MyAvatarBtn, false);
         }

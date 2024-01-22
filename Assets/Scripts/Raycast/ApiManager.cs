@@ -1,14 +1,19 @@
+using System;
 using System.Collections;
-using System.Collections.Generic;
-using System.Net;
+using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.Networking;
+using UnityEngine.XR.ARFoundation;
 
 public class ApiManager
 {
-    public IEnumerator PostRequest(string encryptedData, string token, System.Action<string> onSuccess, System.Action onFailed)
+    public IEnumerator PostRequest(string encodedData, string token, string baseUrl, System.Action<string> onSuccess, System.Action<string> onFailed)
     {
-        string url = "https://func-digitalprofile-test.azurewebsites.net/api/Friend/GetFriendDetailFromQR";
+        // Define the URL to call
+        string url = baseUrl + "/Friend/GetBeevatarUrlFromQR";
+
+        // Get Encrypted Data
+        string encryptedData = GetEncryptedData(encodedData);
 
         // Create a new UnityWebRequest, and set the url
         UnityWebRequest request = new UnityWebRequest(url, "POST");
@@ -29,51 +34,69 @@ public class ApiManager
         // Send the request
         yield return request.SendWebRequest();
 
+
         // Check for errors
         if (request.result == UnityWebRequest.Result.ConnectionError)
         {
-            onFailed?.Invoke();
+            onFailed?.Invoke("Failed to retrieve data, connection error");
+            yield break;
         }
-        else
+
+        var response = request.downloadHandler.text;
+
+        if (request.responseCode == 400 && response == "QR code already expired")
         {
-            if (request.responseCode != 200 || string.IsNullOrEmpty(request.downloadHandler.text))
-            {
-                onFailed?.Invoke();
-            }
-            else
-            {
-                var response = JsonUtility.FromJson<ApiResponse>(request.downloadHandler.text);
-                onSuccess?.Invoke(ChangeUrlExtension(response.data.userBeevatarUrl));
-            }
+            onFailed?.Invoke("Failed to retrieve data, " + response);
+            yield break;
         }
+
+        if (request.responseCode != 200 || string.IsNullOrEmpty(response))
+        {
+            onFailed?.Invoke("Failed to retrieve data");
+            yield break;
+        }
+
+        var data = JsonUtility.FromJson<ApiResponse>(response);
+        var userBeevatarUrl = ChangeUrlExtension(data.beevatarUrl);
+
+        if(string.IsNullOrEmpty(userBeevatarUrl))
+        {
+            onFailed?.Invoke("The user has not created a beevatar");
+            yield break;
+        }
+
+        // On Success
+        onSuccess?.Invoke(userBeevatarUrl);
     }
 
     public string ChangeUrlExtension(string url)
     {
-        string withoutExtension = System.IO.Path.ChangeExtension(url, null);
+        if (string.IsNullOrEmpty(url)) return null;
+        Uri uri = new Uri(url);
+        string withoutQuery = uri.GetLeftPart(UriPartial.Path);
+        string withoutExtension = System.IO.Path.ChangeExtension(withoutQuery, null);
         string newUrl = withoutExtension + ".glb";
         return newUrl;
+    }
+
+    public string GetEncryptedData(string url)
+    {
+        string prefix = "digitalprofile-friend-";
+        int index = url.IndexOf(prefix);
+        if (index >= 0)
+        {
+            return url.Substring(index + prefix.Length);
+        }
+        else
+        {
+            return null;
+        }
     }
 }
 
 [System.Serializable]
 public class ApiResponse
 {
-    public string status;
-    public string message;
-    public UserData data;
+    public string beevatarUrl;
 }
 
-[System.Serializable]
-public class UserData
-{
-    public string fullName;
-    public string gender;
-    public string userCode;
-    public string academicGroupDesc;
-    public string academicOrganizationDesc;
-    public string campusDescription;
-    public string userPictureUrl;
-    public string userBeevatarUrl;
-    public bool usingBeevatar;
-}

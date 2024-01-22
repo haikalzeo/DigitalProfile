@@ -5,29 +5,35 @@ public class NativeAPI : MonoBehaviour
 {
     #if UNITY_IOS && !UNITY_EDITOR
             [DllImport("__Internal")]
-            public static extern void sendMessageToMobileApp(string message);
+            public static extern void sendMessageToRN(string message);
     #endif
 }
 
-
-public class messageSent : MonoBehaviour
+public class MessageSent : MonoBehaviour
 {
-    public static messageSent instance;
+    public static MessageSent instance;
+    private void Awake()
+    {
+        if (instance == null)
+        {
+            instance = this;
+        }
+    }
 
-    public void ButtonPressed()
+    public void SentRNMessage(string log)
     {
         if (Application.platform == RuntimePlatform.Android)
         {
             using (AndroidJavaClass jc = new AndroidJavaClass("com.azesmwayreactnativeunity.ReactNativeUnityViewManager"))
             {
-                jc.CallStatic("sendMessageToMobileApp", "Here is the Message");
+                jc.CallStatic("sendMessageToRN", log);
             }
         }
         else if (Application.platform == RuntimePlatform.IPhonePlayer)
         {
-            #if UNITY_IOS && !UNITY_EDITOR
-                    NativeAPI.sendMessageToMobileApp("Here is the Message");
-            #endif
+#if UNITY_IOS && !UNITY_EDITOR
+                    NativeAPI.sendMessageToRN(log);
+#endif
         }
     }
 }
